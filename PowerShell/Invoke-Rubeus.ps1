@@ -19,7 +19,7 @@ function Invoke-Rubeus
     $StringWriter = New-Object IO.StringWriter
     [Console]::SetOut($StringWriter)
 
-    [DreiKopfHund.Program]::Main($Command.Split(" "))
+    [Rubeus.Program]::Main($Command.Split(" "))
 
     [Console]::SetOut($OldConsoleOut)
     $Results = $StringWriter.ToString()
