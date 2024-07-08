@@ -13,7 +13,7 @@ function frisks
         [Switch]
         $DHfzOrCR99,
         [Switch]
-        $HHuuGUhW99,
+        $Stealth,
         [String]
         $GUpAwpzK99,
         [String]
