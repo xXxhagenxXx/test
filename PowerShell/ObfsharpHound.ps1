@@ -4,7 +4,7 @@ function frisks
     param(
         [Alias("c")]
         [String[]]
-        $kuLFRiWN99 = [String[]]@('Default'),
+        $CollectionMethods = [String[]]@('Default'),
         [Alias("d")]
         [String]
         $zrKKKLOz99,
